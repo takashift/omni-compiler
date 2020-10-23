@@ -1,11 +1,8 @@
 package exc.openacc;
-
-import exc.block.FuncDefBlock;
-import exc.block.FunctionBlock;
+import exc.block.*;
 import exc.object.*;
 import xcodeml.util.XmOption;
-
-import exc.block.*;
+import java.util.*;
 
 public class AccHybridTranslator implements XobjectDefVisitor {
 	// private final ACCglobalDecl _globalDecl;
@@ -16,6 +13,7 @@ public class AccHybridTranslator implements XobjectDefVisitor {
 	private boolean is_original_file = false;
 	private boolean is_next_marker_original_file = false;
 	private String include_file;
+	private AccInformation accInfo;
 
 	public AccHybridTranslator(XobjectFile xobjFile, String originFileName, String acc_ondevice) {
 		if (!XmOption.isLanguageC()) {
@@ -129,8 +127,9 @@ public class AccHybridTranslator implements XobjectDefVisitor {
 
 			if (block.Opcode() == Xcode.ACC_PRAGMA) {
 				PragmaBlock pragmaBlock = ((PragmaBlock) block);
+				String directiveName = pragmaBlock.getPragma();
 
-				if (pragmaBlock.getPragma().equals("ONDEVICE")) {
+				if (directiveName.equals("ONDEVICE")) {
 					Xobject clauses = pragmaBlock.getClauses();
 					if (clauses == null) {
 						// エラーにしたい
@@ -144,6 +143,18 @@ public class AccHybridTranslator implements XobjectDefVisitor {
 						// newBody.add(block);
 						// }
 					}
+
+System.out.println(directiveName);
+					try {
+						doPragmaInfoReader(pragmaBlock, directiveName);
+					} catch (ACCexception e) {
+						ACC.error(block.getLineNo(), e.getMessage());
+					}
+					List<Block> kernelBody = new ArrayList<Block>();
+					kernelBody.add(pragmaBlock);				
+					AccKernel accKernel = new AccKernel(null, pragmaBlock, accInfo, kernelBody);
+					accKernel.analyze();
+
 
 					// XMPrewriteExprの rewriteACCClauses() を参考に記述
 					bottomupXobjectIterator iter = new bottomupXobjectIterator(clauses);
@@ -212,6 +223,19 @@ public class AccHybridTranslator implements XobjectDefVisitor {
 		// Xobject x = def.getDef();
 		// doNonFuncDef(x);
 		// }
+	}
+
+	void doPragmaInfoReader(PragmaBlock pb, String directiveName) throws ACCexception {
+System.out.println(directiveName);
+
+		ACCpragma directive = ACCpragma.valueOf(directiveName);
+		if (!directive.isLocalDirective()) {
+			throw new ACCexception(directiveName + " is not local directive");
+		}
+
+		Xobject clauseList = pb.getClauses();
+		accInfo = new AccInformation(directive, clauseList);
+
 	}
 
 	// private void doFuncDef(FunctionBlock fb){
