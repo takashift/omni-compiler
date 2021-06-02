@@ -1,0 +1,152 @@
+package exc.openacc;
+
+import exc.block.*;
+import exc.object.*;
+import java.util.*;
+
+class AccTargetDev extends AccData{
+  private Block _targetDevBlock;
+  private final AccKernel _accKernel;
+
+  AccTargetDev(ACCglobalDecl decl, AccInformation info, PragmaBlock pb) {
+    super(decl, info, pb);
+
+    List<Block> kernelBody = new ArrayList<Block>();
+    kernelBody.add(_pb);
+    _accKernel = new AccKernel(_decl, _pb, _info, kernelBody);
+  }
+
+  @Override
+  void analyze() throws ACCexception {
+    if(isDisabled()){
+      return;
+    }
+    // completeParallelism();
+
+System.out.println("解析前");
+
+    //analyze and complete clause for kernel
+    _accKernel.analyze();
+
+System.out.println("解析後");
+
+    //set unspecified var's attribute from outerIdSet
+    //TODO do these process at analyze
+    // Set<Ident> readOnlyOuterIdSet = _accKernel.getReadOnlyOuterIdSet();
+    // for (Ident id : _accKernel.getOuterIdList()) {
+    //   String varName = id.getName();
+    //   if(_info.isDeclared(varName)) continue; //if declared in same directive
+
+    //   ACCvar parentVar = findParentVar(id);
+    //   ACCvar var = _info.findACCvar(varName);
+
+
+    //   boolean isReductionVariableInKernel = isReductionVariableInKernel(id);
+
+    //   if (!id.Type().isPointer()
+    //           && (ACC.version >= 20 || readOnlyOuterIdSet.contains(id))
+    //           && parentVar == null/* not appeared in outer data clause*/
+    //           && (var == null || !var.isReduction()) /* not reduction variable in the directive */
+    //           && !isReductionVariableInKernel /* not reduction variable in the kernel*/ ) {
+    //     _info.addVar(ACCpragma.FIRSTPRIVATE, Xcons.Symbol(Xcode.VAR, varName));
+    //   }else {
+    //     _info.addVar(ACCpragma.PRESENT_OR_COPY, Xcons.Symbol(Xcode.VAR, varName));
+    //   }
+    // }
+
+    // //this is the end of analyze
+    // super.analyze();
+  }
+
+  private boolean isReductionVariableInKernel(Ident id)
+  {
+    BlockIterator blockIterator = new topdownBlockIterator(_pb.getBody());
+    for(blockIterator.init(); !blockIterator.end(); blockIterator.next()){
+      Block b = blockIterator.getBlock();
+      if(b.Opcode() != Xcode.ACC_PRAGMA) continue;
+      AccDirective directive = (AccDirective)b.getProp(AccDirective.prop);
+      AccInformation info = directive.getInfo();
+      ACCvar var = info.findReductionACCvar(id.getName());
+      if(var != null && var.getId() == id){
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void completeParallelism() throws ACCexception{
+    BlockIterator blockIterator = new topdownBlockIterator(_pb.getBody());
+    for(blockIterator.init(); !blockIterator.end(); blockIterator.next()){
+      Block b = blockIterator.getBlock();
+      if(b.Opcode() != Xcode.ACC_PRAGMA) continue;
+PragmaBlock pragmaBlock = ((PragmaBlock) b);
+System.out.println("completeParallelism: "+pragmaBlock.getPragma());
+      AccDirective directive = (AccDirective)b.getProp(AccDirective.prop);
+      directive.analyze();
+    }
+  }
+
+  @Override
+  void generate() throws ACCexception {
+    if(isDisabled()){
+      return;
+    }
+System.out.println("ジェネレーター開始");
+
+    //generate data
+    super.generate();
+
+    _targetDevBlock = _accKernel.makeLaunchFuncCallBlockMHOAT();
+System.out.println("ジェネレーター終了");
+  }
+
+  @Override
+  void rewrite() throws ACCexception {
+    if(isDisabled()){
+      _pb.replace(Bcons.COMPOUND(_pb.getBody()));
+      return;
+    }
+
+System.out.println("リライター開始");
+
+    //build
+    BlockList beginBody = Bcons.emptyBody();
+    for(Block b : initBlockList) beginBody.add(b);
+    for(Block b : copyinBlockList) beginBody.add(b);
+    BlockList endBody = Bcons.emptyBody();
+    for(Block b : copyoutBlockList) endBody.add(b);
+    for(Block b : finalizeBlockList) endBody.add(b);
+
+    Block beginBlock = Bcons.COMPOUND(beginBody);
+    Block endBlock = Bcons.COMPOUND(endBody);
+
+    BlockList resultBody = Bcons.emptyBody();
+    for(Xobject x: idList){
+      resultBody.addIdent((Ident)x);
+    }
+
+    Xobject ifExpr = _info.getIntExpr(ACCpragma.IF);
+    boolean isEnabled = (ifExpr == null || (ifExpr.isIntConstant() && !ifExpr.isZeroConstant()));
+    if(isEnabled){
+      resultBody.add(beginBlock);
+      resultBody.add(_targetDevBlock);
+      resultBody.add(endBlock);
+    }else {
+      Ident condId = resultBody.declLocalIdent("_ACC_DATA_IF_COND", Xtype.charType, StorageClass.AUTO, ifExpr);
+      resultBody.add(Bcons.IF(condId.Ref(), beginBlock, null));
+      resultBody.add(Bcons.IF(condId.Ref(), _targetDevBlock, Bcons.COMPOUND(_pb.getBody())));
+      resultBody.add(Bcons.IF(condId.Ref(), endBlock, null));
+    }
+
+    _pb.replace(Bcons.COMPOUND(resultBody));
+  }
+
+  boolean isAcceptableClause(ACCpragma clauseKind){
+    switch (clauseKind) {
+    case ONDEVICE:
+      return true;
+    default:
+      return clauseKind.isDataClause() || clauseKind.isReduction();
+    }
+  }
+}
