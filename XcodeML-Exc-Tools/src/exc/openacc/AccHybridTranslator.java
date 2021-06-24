@@ -104,7 +104,7 @@ public class AccHybridTranslator implements XobjectDefVisitor {
 		FunctionBlock fb = fd.getBlock();
 		String funcName = fb.getName();
 
-		if (funcName.equals("main") && _acc_ondevice.equals("FPGA")) {
+		if (funcName.equals("main") && _acc_ondevice.equals("GPU")) {
 			// BlockList body = block.getBody();
 			// if (body.getDecls() != null) {
 			// BlockList newBody = Bcons.emptyBody(body.getIdentList().copy(),
@@ -192,14 +192,14 @@ public class AccHybridTranslator implements XobjectDefVisitor {
 							}
 						}
 					}
-				} else if (_acc_ondevice.equals("FPGA")) {
+				} else if (_acc_ondevice.equals("GPU")) {
 					def.setDef(null);
 					return;
 				}
 			}
 		}
 
-		if (_acc_ondevice.equals("FPGA")) {
+		if (_acc_ondevice.equals("GPU")) {
 			def.setDef(null);
 		}
 
